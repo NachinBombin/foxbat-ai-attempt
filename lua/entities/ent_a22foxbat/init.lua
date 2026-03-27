@@ -228,11 +228,27 @@ end
 
 -- ============================================================
 -- DAMAGE
+-- FIX 1: Zero the physics impulse so the plane does NOT get
+--        knocked/launched every time it takes a hit.
+-- FIX 2: Call self.BaseClass.OnTakeDamage so the engine
+--        actually registers the damage event (required by
+--        LVS/NFP base which hooks into it for their own HP
+--        accounting). Without this call our NFP_HP subtraction
+--        was running, but the base-layer HP remained full,
+--        causing perceived "infinite health" in some scenarios.
 -- ============================================================
 
 function ENT:OnTakeDamage( dmginfo )
     if self._nfpDiveExploded then return end
     if dmginfo:IsDamageType( DMG_CRUSH ) then return end
+
+    -- FIX 1: strip the physics force so VPhysics does not
+    -- launch / jitter the entity on every bullet impact.
+    dmginfo:SetDamageForce( Vector( 0, 0, 0 ) )
+    dmginfo:SetDamagePosition( self:GetPos() )
+
+    -- FIX 2: let the base layer process the damage first.
+    self.BaseClass.OnTakeDamage( self, dmginfo )
 
     local nfpHP = self:GetNWInt( "NFP_HP", 200 ) - dmginfo:GetDamage()
     self:SetNWInt( "NFP_HP", nfpHP )
