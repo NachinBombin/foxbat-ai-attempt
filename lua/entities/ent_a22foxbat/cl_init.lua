@@ -1,26 +1,86 @@
 include( "shared.lua" )
 
+-- ============================================================
+-- PROPELLER CONFIG
+-- ============================================================
+
+local PROP_BONE        = 9
+local PROP_RPM_CRUISE  = 700
+local PROP_RPM_DIVE    = 200
+local PROP_BLUR_THRESH = 470
+local PROP_BODYGROUP   = 1
+
+-- ============================================================
+-- TINT CONFIG
+-- ============================================================
+
+local FOXBAT_COLOR = Color( 18, 18, 18, 255 )  -- deep black
+
+-- ============================================================
+-- SPAWN
+-- ============================================================
+
 function ENT:OnSpawn()
 	self:RegisterTrail( Vector(-25,-219,84), 0, 20, 2, 1000, 600 )
 	self:RegisterTrail( Vector(-25, 219,84), 0, 20, 2, 1000, 600 )
+
+	self:SetRenderMode( RENDERMODE_TRANSCOLOR )
+	self:SetColor( FOXBAT_COLOR )
+
+	self._foxbatCurRPM = 0
+	self._foxbatRPM    = 0
 end
+
+-- ============================================================
+-- DRAW
+-- ============================================================
+
+function ENT:Draw()
+	self:DrawModel()
+end
+
+-- ============================================================
+-- PER-FRAME
+-- ============================================================
 
 function ENT:OnFrame()
 	local nfpFT = RealFrameTime()
 	self:NFP_AnimControlSurfaces( nfpFT )
 	self:NFP_AnimLandingGear( nfpFT )
-	self:NFP_AnimRotor( nfpFT )
+	self:FoxbatAnimRotor( nfpFT )
 end
 
-function ENT:NFP_AnimRotor( nfpFrametime )
-	if not self.RotorRPM then return end
-	local nfpPhysRot = self.RotorRPM < 470
-	self._nfpRotorAcc = self._nfpRotorAcc and (self._nfpRotorAcc + self.RotorRPM * nfpFrametime * (nfpPhysRot and 4 or 1)) or 0
-	local nfpRot = Angle(0,0,self._nfpRotorAcc)
-	nfpRot:Normalize()
-	self:ManipulateBoneAngles( 9, nfpRot )
-	self:SetBodygroup( 1, nfpPhysRot and 0 or 1 )
+-- ============================================================
+-- ROTOR  (self-contained, cruise/dive RPM via NWBool)
+-- ============================================================
+
+function ENT:FoxbatAnimRotor( frametime )
+	if not self._foxbatCurRPM then
+		self._foxbatCurRPM = 0
+		self._foxbatRPM    = 0
+	end
+
+	local targetRPM = self:GetNWBool( "FoxbatDiving", false )
+		and PROP_RPM_DIVE
+		or  PROP_RPM_CRUISE
+
+	self._foxbatCurRPM = self._foxbatCurRPM
+		+ ( targetRPM - self._foxbatCurRPM ) * frametime * 2
+
+	local physRot = self._foxbatCurRPM < PROP_BLUR_THRESH
+
+	self._foxbatRPM = self._foxbatRPM
+		+ self._foxbatCurRPM * frametime * ( physRot and 4 or 1 )
+
+	local rot = Angle( 0, 0, self._foxbatRPM )
+	rot:Normalize()
+	self:ManipulateBoneAngles( PROP_BONE, rot )
+	self:SetBodygroup( PROP_BODYGROUP, physRot and 0 or 1 )
 end
+
+-- ============================================================
+-- CONTROL SURFACES
+-- ============================================================
 
 function ENT:NFP_AnimControlSurfaces( nfpFrametime )
 	local nfpFT    = nfpFrametime * 10
@@ -39,6 +99,10 @@ function ENT:NFP_AnimControlSurfaces( nfpFrametime )
 	self:ManipulateBoneAngles( 6, Angle( 0, -self._nfpSmPitch, 0 ) )
 	self:ManipulateBoneAngles( 5, Angle( self._nfpSmYaw, 0, 0 ) )
 end
+
+-- ============================================================
+-- LANDING GEAR
+-- ============================================================
 
 function ENT:NFP_AnimLandingGear( nfpFrametime )
 	self._nfpSmGear = self._nfpSmGear and self._nfpSmGear + (30 * (1 - self:GetLandingGear()) - self._nfpSmGear) * nfpFrametime * 8 or 0
