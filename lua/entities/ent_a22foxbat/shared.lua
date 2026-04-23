@@ -9,4 +9,4 @@ ENT.Category       = "A22 Foxbat"
 ENT.Spawnable      = false
 ENT.AdminSpawnable = false
 
-ENT.RenderGroup    = RENDERGROUP_BOTH
+ENT.RenderGroup    = RENDERGROUP_OPAQUE

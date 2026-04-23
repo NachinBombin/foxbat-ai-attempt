@@ -48,13 +48,11 @@ local NFP_SND_PASS  = {
 
 function ENT:NFP_SpawnBellyBomb()
     local nfpWorldPos = self:LocalToWorld( NFP_BELLY_BOMB_OFFSET )
-
     local nfpBomb = ents.Create( "gb_bomb_sc250" )
     if not IsValid( nfpBomb ) then
         self:NFP_Debug( "WARNING: gb_bomb_sc250 not available" )
         return
     end
-
     nfpBomb.IsOnPlane      = true
     nfpBomb.FoxbatAttached = true
     nfpBomb:SetPos( nfpWorldPos )
@@ -63,35 +61,28 @@ function ENT:NFP_SpawnBellyBomb()
     nfpBomb:Activate()
     nfpBomb:Arm()
     nfpBomb:SetCollisionGroup( COLLISION_GROUP_DEBRIS_TRIGGER )
-
     nfpBomb.OnTakeDamage = function( nfpSelf, dmginfo )
         if nfpSelf.FoxbatAttached then return end
         return nfpSelf.BaseClass.OnTakeDamage( nfpSelf, dmginfo )
     end
-
     self._nfpBellyBomb     = nfpBomb
     self._nfpBellyBombWeld = constraint.Weld( self, nfpBomb, 0, 0, 0, true, true )
     self._nfpBombDetached  = false
-
     self:NFP_Debug( "Belly bomb armed" )
 end
 
 function ENT:NFP_DetachBomb( nfpPos )
     if self._nfpBombDetached then return end
     self._nfpBombDetached = true
-
     local nfpBomb = self._nfpBellyBomb
     if not IsValid( nfpBomb ) then return end
-
     if IsValid( self._nfpBellyBombWeld ) then
         self._nfpBellyBombWeld:Remove()
         self._nfpBellyBombWeld = nil
     end
-
     nfpBomb.FoxbatAttached = nil
     nfpBomb:SetCollisionGroup( COLLISION_GROUP_NONE )
     nfpBomb:SetPos( nfpPos )
-
     timer.Simple( 0, function()
         if IsValid( nfpBomb ) then nfpBomb:ExplodeCorrectly() end
     end )
@@ -145,13 +136,16 @@ function ENT:Initialize()
     self:SetCollisionGroup( COLLISION_GROUP_INTERACTIVE_DEBRIS )
     self:SetPos( nfpSpawnPos )
 
+    -- visual setup server-side (AN-71 pattern)
     self:SetBodygroup( 4, 1 )
     self:SetBodygroup( 3, 1 )
     self:SetBodygroup( 5, 2 )
+    self:SetBodygroup( 1, 1 )  -- blur disc on from spawn
+    self:SetRenderMode( RENDERMODE_TRANSCOLOR )
+    self:SetColor( Color( 18, 18, 18, 255 ) )
 
     self:SetNWInt( "NFP_HP",    200 )
     self:SetNWInt( "NFP_MaxHP", 200 )
-    self:SetNWBool( "FoxbatDiving", false )
 
     local nfpStartYaw = self._nfpCallDir:Angle().y + 70
     self:SetAngles( Angle( self.NFP_PitchCruise, nfpStartYaw, 0 ) )
@@ -165,7 +159,6 @@ function ENT:Initialize()
 
     self._nfpWanderTarget    = nfpSpawnPos
     self._nfpNextWander      = CurTime() + math.Rand( 3, 7 )
-
     self._nfpMode            = "cruise"
 
     self._nfpDiveActive      = false
@@ -178,7 +171,6 @@ function ENT:Initialize()
     self._nfpWobblePhaseH    = 0
     self._nfpWobblePhaseV    = math.Rand( 0, math.pi * 2 )
     self._nfpDiveAimOffset   = Vector(0,0,0)
-
     self._nfpSearchExpiry    = 0
 
     self._nfpPhysObj = self:GetPhysicsObject()
@@ -188,7 +180,7 @@ function ENT:Initialize()
         self._nfpPhysObj:SetDamping( 0, 0 )
     end
 
-    -- AN-71 audio: entity-anchored, proper 3D falloff
+    -- AN-71 audio pattern
     sound.Play( NFP_SND_START, nfpSpawnPos, 90, 100, 1.0 )
 
     self._nfpSndClose = CreateSound( self, NFP_SND_LOOP )
@@ -223,13 +215,9 @@ end
 function ENT:OnTakeDamage( dmginfo )
     if self._nfpDiveExploded then return end
     if dmginfo:IsDamageType( DMG_CRUSH ) then return end
-
     local nfpHP = self:GetNWInt( "NFP_HP", 200 ) - dmginfo:GetDamage()
     self:SetNWInt( "NFP_HP", nfpHP )
-
-    if nfpHP <= 0 then
-        self:NFP_DiveExplode( self:GetPos() )
-    end
+    if nfpHP <= 0 then self:NFP_DiveExplode( self:GetPos() ) end
 end
 
 -- ============================================================
@@ -275,32 +263,28 @@ function ENT:NFP_ThinkCruise( nfpNow, nfpDT )
         local nfpDist   = math.Rand( self._nfpOrbitRadius * 0.3, self._nfpOrbitRadius )
         local nfpWX     = self._nfpCenterPos.x + math.cos( math.rad(nfpAngle) ) * nfpDist
         local nfpWY     = self._nfpCenterPos.y + math.sin( math.rad(nfpAngle) ) * nfpDist
-
         local nfpAltLow  = self._nfpGroundZ + self.NFP_AltMin
         local nfpAltHigh = self._nfpGroundZ + self.NFP_AltMax
-        self._nfpAltTarget = math.Rand( nfpAltLow, nfpAltHigh )
-
+        self._nfpAltTarget    = math.Rand( nfpAltLow, nfpAltHigh )
         self._nfpWanderTarget = Vector( nfpWX, nfpWY, self._nfpAltTarget )
         self._nfpNextWander   = nfpNow + math.Rand( self.NFP_WanderInterval[1], self.NFP_WanderInterval[2] )
 
         if math.random() < self.NFP_CruiseDiveChance then
-            self._nfpMode = "dive_search"
+            self._nfpMode         = "dive_search"
             self._nfpSearchExpiry = nfpNow + self.NFP_SearchWindow
             self:NFP_Debug( "DIVE_SEARCH armed" )
             return
         end
-
-        self:NFP_Debug( "New wander: " .. tostring(self._nfpWanderTarget) )
     end
 
-    local nfpToTarget  = self._nfpWanderTarget - nfpPos
+    local nfpToTarget   = self._nfpWanderTarget - nfpPos
     local nfpDesiredYaw = math.deg( math.atan2( nfpToTarget.y, nfpToTarget.x ) )
-    local nfpYawErr    = math.NormalizeAngle( nfpDesiredYaw - self._nfpYaw )
-    local nfpTurnStep  = math.Clamp( nfpYawErr, -self.NFP_TurnRate * nfpDT, self.NFP_TurnRate * nfpDT )
+    local nfpYawErr     = math.NormalizeAngle( nfpDesiredYaw - self._nfpYaw )
+    local nfpTurnStep   = math.Clamp( nfpYawErr, -self.NFP_TurnRate * nfpDT, self.NFP_TurnRate * nfpDT )
     self._nfpYaw = self._nfpYaw + nfpTurnStep
 
-    local nfpAltErr   = self._nfpAltTarget - self._nfpAltCurrent
-    local nfpAltStep  = math.Clamp( nfpAltErr, -self.NFP_AltStepRate * nfpDT, self.NFP_AltStepRate * nfpDT )
+    local nfpAltErr  = self._nfpAltTarget - self._nfpAltCurrent
+    local nfpAltStep = math.Clamp( nfpAltErr, -self.NFP_AltStepRate * nfpDT, self.NFP_AltStepRate * nfpDT )
     self._nfpAltCurrent = self._nfpAltCurrent + nfpAltStep
 
     local nfpVisualPitch = math.Clamp( -nfpAltStep / (self.NFP_AltStepRate * nfpDT) * 12 + self.NFP_PitchCruise, -20, 15 )
@@ -356,18 +340,10 @@ function ENT:NFP_ThinkDiveSearch( nfpNow, nfpDT )
     for _, nfpPly in ipairs( player.GetAll() ) do
         if not IsValid( nfpPly ) or not nfpPly:Alive() then continue end
         if nfpPly:IsFlagSet( FL_NOTARGET ) then continue end
-
         local nfpDir = (nfpPly:GetPos() - nfpMyPos):GetNormalized()
         if nfpFwd:Dot( nfpDir ) <= 0 then continue end
-
-        local nfpTr = util.TraceLine({
-            start  = nfpMyPos,
-            endpos = nfpPly:GetPos(),
-            filter = self,
-            mask   = MASK_SOLID_BRUSHONLY,
-        })
+        local nfpTr = util.TraceLine({ start = nfpMyPos, endpos = nfpPly:GetPos(), filter = self, mask = MASK_SOLID_BRUSHONLY })
         if nfpTr.Hit then continue end
-
         self._nfpMode           = "dive_commit"
         self._nfpDiveTarget     = nfpPly
         self._nfpDiveActive     = false
@@ -393,27 +369,21 @@ function ENT:NFP_ThinkDiveCommit( nfpNow, nfpDT )
     if not IsValid( self._nfpDiveTarget ) or not self._nfpDiveTarget:Alive() then
         self._nfpMode       = "cruise"
         self._nfpDiveActive = false
-        self:SetNWBool( "FoxbatDiving", false )
         self:NFP_Debug( "DIVE_COMMIT: target lost" )
         return
     end
 
     if not self._nfpDiveActive then
-        self._nfpDiveActive      = true
-        self._nfpDiveTargetPos   = self._nfpDiveTarget:GetPos()
-        self._nfpDiveNextTrack   = nfpNow
-        self._nfpDiveExploded    = false
-        self._nfpDiveSpeedNow    = self.NFP_DiveSpeed * 0.5
-        self._nfpWobblePhaseH    = 0
-        self._nfpWobblePhaseV    = math.Rand( 0, math.pi * 2 )
-        self._nfpDiveAimOffset   = Vector( math.Rand(-350,350), math.Rand(-350,350), 0 )
-
+        self._nfpDiveActive    = true
+        self._nfpDiveTargetPos = self._nfpDiveTarget:GetPos()
+        self._nfpDiveNextTrack = nfpNow
+        self._nfpDiveExploded  = false
+        self._nfpDiveSpeedNow  = self.NFP_DiveSpeed * 0.5
+        self._nfpWobblePhaseH  = 0
+        self._nfpWobblePhaseV  = math.Rand( 0, math.pi * 2 )
+        self._nfpDiveAimOffset = Vector( math.Rand(-350,350), math.Rand(-350,350), 0 )
         self:SetCollisionGroup( COLLISION_GROUP_NONE )
-        self:SetNWBool( "FoxbatDiving", true )
-
-        if IsValid( self._nfpBellyBomb ) then
-            self._nfpBellyBomb:SetCollisionGroup( COLLISION_GROUP_NONE )
-        end
+        if IsValid( self._nfpBellyBomb ) then self._nfpBellyBomb:SetCollisionGroup( COLLISION_GROUP_NONE ) end
         if IsValid( self._nfpPhysObj ) then
             self._nfpPhysObj:EnableGravity( false )
             self._nfpPhysObj:SetVelocity( Vector(0,0,0) )
@@ -442,13 +412,9 @@ function ENT:NFP_UpdateDive( nfpNow, nfpDT )
     local nfpDir    = nfpAimPos - nfpMyPos
     local nfpDist   = nfpDir:Length()
 
-    if nfpDist < 120 then
-        self:NFP_DiveExplode( nfpMyPos )
-        return
-    end
+    if nfpDist < 120 then self:NFP_DiveExplode( nfpMyPos ) return end
 
     nfpDir:Normalize()
-
     self._nfpDiveSpeedNow = Lerp( self.NFP_DiveAccel, self._nfpDiveSpeedNow, self.NFP_DiveSpeed )
 
     self._nfpWobblePhaseH = self._nfpWobblePhaseH + self.NFP_WobbleSpeedH * nfpDT
@@ -477,16 +443,8 @@ function ENT:NFP_UpdateDive( nfpNow, nfpDT )
         self._nfpYaw = nfpFaceAng.y
     end
 
-    local nfpTr = util.TraceLine({
-        start  = nfpMyPos,
-        endpos = nfpNewPos,
-        filter = self,
-        mask   = MASK_SOLID,
-    })
-    if nfpTr.Hit then
-        self:NFP_DiveExplode( nfpTr.HitPos )
-        return
-    end
+    local nfpTr = util.TraceLine({ start = nfpMyPos, endpos = nfpNewPos, filter = self, mask = MASK_SOLID })
+    if nfpTr.Hit then self:NFP_DiveExplode( nfpTr.HitPos ) return end
 
     self:SetPos( nfpNewPos )
     if IsValid( self._nfpPhysObj ) then
@@ -502,8 +460,6 @@ end
 function ENT:NFP_DiveExplode( nfpPos )
     if self._nfpDiveExploded then return end
     self._nfpDiveExploded = true
-
-    self:SetNWBool( "FoxbatDiving", false )
 
     local nfpEd = EffectData()
     nfpEd:SetOrigin( nfpPos ) nfpEd:SetScale(5) nfpEd:SetMagnitude(5) nfpEd:SetRadius(500)
@@ -531,7 +487,6 @@ function ENT:NFP_FindGround( nfpCenterPos )
     local nfpEnd    = Vector( nfpCenterPos.x, nfpCenterPos.y, -16384 )
     local nfpFilter = { self }
     local nfpIter   = 0
-
     while nfpIter < 100 do
         local nfpTr = util.TraceLine({ start = nfpStart, endpos = nfpEnd, filter = nfpFilter })
         if nfpTr.HitWorld then return nfpTr.HitPos.z end
@@ -552,7 +507,6 @@ end
 function ENT:OnRemove()
     if self._nfpSndClose then self._nfpSndClose:Stop() end
     if self._nfpSndDist  then self._nfpSndDist:Stop()  end
-
     if not self._nfpBombDetached and IsValid( self._nfpBellyBomb ) then
         self._nfpBellyBomb:Remove()
     end
