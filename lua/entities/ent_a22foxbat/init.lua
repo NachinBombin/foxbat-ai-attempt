@@ -43,6 +43,11 @@ local NFP_SND_PASS  = {
 }
 
 -- ============================================================
+-- NET STRING
+-- ============================================================
+util.AddNetworkString("bombin_plane_damage_tier")
+
+-- ============================================================
 -- BELLY BOMB
 -- ============================================================
 
@@ -97,6 +102,26 @@ function ENT:NFP_Debug( nfpMsg )
 end
 
 -- ============================================================
+-- DAMAGE TIER HELPERS
+-- ============================================================
+
+local function NFP_CalcTier(hp, maxHP)
+    local frac = hp / maxHP
+    if frac > 0.66 then return 0
+    elseif frac > 0.33 then return 1
+    elseif frac > 0 then return 2
+    else return 3
+    end
+end
+
+local function NFP_BroadcastTier(ent, tier)
+    net.Start("bombin_plane_damage_tier")
+        net.WriteUInt(ent:EntIndex(), 16)
+        net.WriteUInt(tier, 2)
+    net.Broadcast()
+end
+
+-- ============================================================
 -- INITIALIZE
 -- ============================================================
 
@@ -109,6 +134,9 @@ function ENT:Initialize()
     self._nfpSkyHeightAdd = self:GetVar( "SkyHeightAdd",         self.NFP_SkyHeightAdd )
     self._nfpDiveExpDmg   = self:GetVar( "DIVE_ExplosionDamage", 350 )
     self._nfpDiveExpRad   = self:GetVar( "DIVE_ExplosionRadius", 600 )
+
+    self._nfpMaxHP   = 200
+    self._nfpDmgTier = 0
 
     if self._nfpCallDir:LengthSqr() <= 1 then self._nfpCallDir = Vector(1,0,0) end
     self._nfpCallDir.z = 0
@@ -136,16 +164,15 @@ function ENT:Initialize()
     self:SetCollisionGroup( COLLISION_GROUP_INTERACTIVE_DEBRIS )
     self:SetPos( nfpSpawnPos )
 
-    -- visual setup server-side (AN-71 pattern)
     self:SetBodygroup( 4, 1 )
     self:SetBodygroup( 3, 1 )
     self:SetBodygroup( 5, 2 )
-    self:SetBodygroup( 1, 1 )  -- blur disc on from spawn
+    self:SetBodygroup( 1, 1 )
     self:SetRenderMode( RENDERMODE_TRANSCOLOR )
     self:SetColor( Color( 18, 18, 18, 255 ) )
 
-    self:SetNWInt( "NFP_HP",    200 )
-    self:SetNWInt( "NFP_MaxHP", 200 )
+    self:SetNWInt( "NFP_HP",    self._nfpMaxHP )
+    self:SetNWInt( "NFP_MaxHP", self._nfpMaxHP )
 
     local nfpStartYaw = self._nfpCallDir:Angle().y + 70
     self:SetAngles( Angle( self.NFP_PitchCruise, nfpStartYaw, 0 ) )
@@ -180,7 +207,6 @@ function ENT:Initialize()
         self._nfpPhysObj:SetDamping( 0, 0 )
     end
 
-    -- AN-71 audio pattern
     sound.Play( NFP_SND_START, nfpSpawnPos, 90, 100, 1.0 )
 
     self._nfpSndClose = CreateSound( self, NFP_SND_LOOP )
@@ -215,8 +241,16 @@ end
 function ENT:OnTakeDamage( dmginfo )
     if self._nfpDiveExploded then return end
     if dmginfo:IsDamageType( DMG_CRUSH ) then return end
-    local nfpHP = self:GetNWInt( "NFP_HP", 200 ) - dmginfo:GetDamage()
+
+    local nfpHP = self:GetNWInt( "NFP_HP", self._nfpMaxHP ) - dmginfo:GetDamage()
     self:SetNWInt( "NFP_HP", nfpHP )
+
+    local tier = NFP_CalcTier(nfpHP, self._nfpMaxHP)
+    if tier ~= self._nfpDmgTier then
+        self._nfpDmgTier = tier
+        NFP_BroadcastTier(self, tier)
+    end
+
     if nfpHP <= 0 then self:NFP_DiveExplode( self:GetPos() ) end
 end
 
