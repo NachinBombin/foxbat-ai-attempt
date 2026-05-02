@@ -34,13 +34,7 @@ local NFP_BELLY_BOMB_OFFSET = Vector( 15, 0, -35 )
 -- SOUNDS
 -- ============================================================
 
-local NFP_SND_START = "lvs_darklord/mi_engine/mi24_engine_start_exterior.wav"
-local NFP_SND_LOOP  = "^lvs_darklord/rotors/rotor_loop_close.wav"
-local NFP_SND_DIST  = "^lvs_darklord/rotors/rotor_loop_dist.wav"
-local NFP_SND_PASS  = {
-    "lvs_darklord/rotors/rotor_loop_close.wav",
-    "lvs_darklord/rotors/rotor_loop_dist.wav",
-}
+local NFP_SND_LOOP = "lyutyy/engine_high.wav"
 
 -- ============================================================
 -- NET STRING
@@ -207,31 +201,36 @@ function ENT:Initialize()
         self._nfpPhysObj:SetDamping( 0, 0 )
     end
 
-    sound.Play( NFP_SND_START, nfpSpawnPos, 90, 100, 1.0 )
-
-    self._nfpSndClose = CreateSound( self, NFP_SND_LOOP )
-    if self._nfpSndClose then
-        self._nfpSndClose:SetSoundLevel( 75 )
-        self._nfpSndClose:ChangePitch( 100, 0 )
-        self._nfpSndClose:ChangeVolume( 1.0, 0.5 )
-        self._nfpSndClose:Play()
+    -- Single engine loop
+    self._nfpSndEngine = CreateSound( self, NFP_SND_LOOP )
+    if self._nfpSndEngine then
+        self._nfpSndEngine:SetSoundLevel( 75 )
+        self._nfpSndEngine:ChangePitch( 100, 0 )
+        self._nfpSndEngine:ChangeVolume( 1.0, 0.5 )
+        self._nfpSndEngine:Play()
     end
-
-    self._nfpSndDist = CreateSound( self, NFP_SND_DIST )
-    if self._nfpSndDist then
-        self._nfpSndDist:SetSoundLevel( 75 )
-        self._nfpSndDist:ChangePitch( 100, 0 )
-        self._nfpSndDist:ChangeVolume( 1.0, 0.5 )
-        self._nfpSndDist:Play()
-    end
-
-    self._nfpNextPassSnd = CurTime() + math.Rand( 5, 10 )
 
     timer.Simple( 0, function()
         if IsValid( self ) then self:NFP_SpawnBellyBomb() end
     end )
 
     self:NFP_Debug( "Spawned at " .. tostring( nfpSpawnPos ) )
+end
+
+-- ============================================================
+-- SOUND STOP HELPER
+-- ============================================================
+
+function ENT:NFP_StopEngineSnd()
+    if not self._nfpSndEngine then return end
+    local snd = self._nfpSndEngine
+    self._nfpSndEngine = nil  -- nil before timer so OnRemove won't double-stop
+    local FADE = 1.2
+    snd:ChangeVolume( 0, FADE )
+    snd:ChangePitch( 55, FADE + 0.3 )
+    timer.Simple( FADE + 0.15, function()
+        if snd then snd:Stop() end
+    end )
 end
 
 -- ============================================================
@@ -266,11 +265,6 @@ function ENT:Think()
 
     if IsValid( self._nfpPhysObj ) and self._nfpPhysObj:IsAsleep() then
         self._nfpPhysObj:Wake()
-    end
-
-    if nfpNow >= self._nfpNextPassSnd then
-        sound.Play( table.Random( NFP_SND_PASS ), self:GetPos(), 100, math.random(96,104), 1.0 )
-        self._nfpNextPassSnd = nfpNow + math.Rand( 6, 14 )
     end
 
     if self._nfpMode == "cruise" then
@@ -495,6 +489,9 @@ function ENT:NFP_DiveExplode( nfpPos )
     if self._nfpDiveExploded then return end
     self._nfpDiveExploded = true
 
+    -- Stop engine sound before Remove() so the CSoundPatch is never orphaned
+    self:NFP_StopEngineSnd()
+
     local nfpEd = EffectData()
     nfpEd:SetOrigin( nfpPos ) nfpEd:SetScale(5) nfpEd:SetMagnitude(5) nfpEd:SetRadius(500)
     util.Effect( "HelicopterMegaBomb", nfpEd, true, true )
@@ -539,8 +536,12 @@ end
 -- ============================================================
 
 function ENT:OnRemove()
-    if self._nfpSndClose then self._nfpSndClose:Stop() end
-    if self._nfpSndDist  then self._nfpSndDist:Stop()  end
+    -- Only fires for lifetime expiry / external Remove().
+    -- _nfpSndEngine is already nil if NFP_StopEngineSnd() ran first.
+    if self._nfpSndEngine then
+        self._nfpSndEngine:Stop()
+        self._nfpSndEngine = nil
+    end
     if not self._nfpBombDetached and IsValid( self._nfpBellyBomb ) then
         self._nfpBellyBomb:Remove()
     end
